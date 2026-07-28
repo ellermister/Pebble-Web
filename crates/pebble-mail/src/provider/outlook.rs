@@ -325,6 +325,19 @@ impl OutlookProvider {
             .map_err(|e| PebbleError::Network(format!("Graph API GET failed: {e}")))
     }
 
+    async fn get_delta(&self, url: &str) -> Result<reqwest::Response> {
+        // Prefer header must be sent on every delta/nextLink/deltaLink request.
+        // Do not use $top for delta paging — Graph treats Prefer maxpagesize as
+        // the page size and $top has been observed to truncate the whole round.
+        self.client
+            .get(url)
+            .bearer_auth(self.token())
+            .header("Prefer", "odata.maxpagesize=50")
+            .send()
+            .await
+            .map_err(|e| PebbleError::Network(format!("Graph API GET failed: {e}")))
+    }
+
     pub async fn fetch_messages_page(
         &self,
         folder_id: &str,
@@ -374,17 +387,19 @@ impl OutlookProvider {
         folder_id: &str,
         cursor: Option<&str>,
     ) -> Result<OutlookDeltaPage> {
+        // Keep body in $select so message detail works from local DB after sync.
+        // Page size is controlled by Prefer: odata.maxpagesize (see get_delta).
         let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
         let url = match cursor {
             Some(cursor) if cursor.starts_with("https://") => cursor.to_string(),
             Some(cursor) if !cursor.is_empty() => cursor.to_string(),
             _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{}/messages/delta?$top=50&$select={select}",
+                "{GRAPH_API_BASE}/mailFolders/{}/messages/delta?$select={select}",
                 encode_graph_id(folder_id)
             ),
         };
 
-        let resp = self.get(&url).await?;
+        let resp = self.get_delta(&url).await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
