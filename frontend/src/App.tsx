@@ -6,8 +6,10 @@ import { isAuthenticated } from "./api-client";
 import { LoginPage } from "./features/auth/LoginPage";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
+import { useMailStore } from "@/stores/mail.store";
 import { accountsQueryKey } from "@/hooks/queries";
 import { queryClient } from "@/lib/query-client";
+import { startSync } from "@/lib/api";
 
 function consumeOAuthCallbackParams() {
   const params = new URLSearchParams(window.location.search);
@@ -19,6 +21,7 @@ function consumeOAuthCallbackParams() {
 
   if (oauth === "success") {
     const email = params.get("email");
+    const accountId = params.get("accountId");
     useToastStore.getState().addToast({
       message: email
         ? i18next.t("accountSetup.oauthSuccessWithEmail", "OAuth account added: {{email}}", { email })
@@ -26,6 +29,13 @@ function consumeOAuthCallbackParams() {
       type: "success",
     });
     void queryClient.invalidateQueries({ queryKey: accountsQueryKey });
+    void queryClient.invalidateQueries({ queryKey: ["folders"] });
+    if (accountId) {
+      useMailStore.getState().setActiveAccountId(accountId);
+      startSync(accountId).catch((err) =>
+        console.warn("Post-OAuth sync trigger failed:", err),
+      );
+    }
   } else if (oauth === "error") {
     const message =
       params.get("message") ||
