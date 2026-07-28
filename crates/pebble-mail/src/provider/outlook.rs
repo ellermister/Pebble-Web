@@ -14,6 +14,24 @@ use pebble_core::{
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0/me";
 
+/// Percent-encode a Graph resource id for use in URL path segments.
+/// Graph folder/message ids can contain characters like `=` or `/` that break unencoded paths.
+fn encode_graph_id(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for b in id.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Microsoft Graph API response types (internal)
 // ---------------------------------------------------------------------------
@@ -317,7 +335,8 @@ impl OutlookProvider {
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => cursor.to_string(),
             _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages?$top={limit}&$select={select}"
+                "{GRAPH_API_BASE}/mailFolders/{}/messages?$top={limit}&$select={select}",
+                encode_graph_id(folder_id)
             ),
         };
         let resp = self.get(&url).await?;
@@ -360,7 +379,8 @@ impl OutlookProvider {
             Some(cursor) if cursor.starts_with("https://") => cursor.to_string(),
             Some(cursor) if !cursor.is_empty() => cursor.to_string(),
             _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta?$top=50&$select={select}"
+                "{GRAPH_API_BASE}/mailFolders/{}/messages/delta?$top=50&$select={select}",
+                encode_graph_id(folder_id)
             ),
         };
 
@@ -634,7 +654,7 @@ impl MailTransport for OutlookProvider {
         } else {
             format!(
                 "{GRAPH_API_BASE}/mailFolders/{}/messages/delta",
-                since.value
+                encode_graph_id(&since.value)
             )
         };
 
@@ -1314,6 +1334,13 @@ fn parse_graph_datetime(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encode_graph_id_encodes_padding_and_slash() {
+        assert_eq!(encode_graph_id("AAMkAD="), "AAMkAD%3D");
+        assert_eq!(encode_graph_id("a/b"), "a%2Fb");
+        assert_eq!(encode_graph_id("Inbox"), "Inbox");
+    }
 
     #[test]
     fn test_well_known_name_to_role_inbox() {

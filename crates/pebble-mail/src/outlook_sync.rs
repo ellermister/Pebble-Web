@@ -544,10 +544,30 @@ impl OutlookSyncWorker {
                 }
             };
 
+            let mut persisted_folders = 0usize;
             for folder in &folders {
-                // Persist folder
-                let _ = self.base.store.insert_folder(folder);
+                match self.base.store.insert_folder(folder) {
+                    Ok(_) => {
+                        persisted_folders += 1;
+                        tracing::debug!(
+                            "Outlook sync persisted folder '{}' (role={:?}) for account {}",
+                            folder.name, folder.role, self.base.account_id
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Outlook sync failed to persist folder '{}' for account {}: {e}",
+                            folder.name, self.base.account_id
+                        );
+                    }
+                }
             }
+            info!(
+                "Outlook sync persisted {}/{} folders for account {}",
+                persisted_folders,
+                folders.len(),
+                self.base.account_id
+            );
 
             // Re-read folders from DB so we use persisted IDs (upsert may keep old IDs)
             let db_folders = self
@@ -558,6 +578,11 @@ impl OutlookSyncWorker {
                 .into_iter()
                 .filter(should_sync_outlook_folder)
                 .collect::<Vec<_>>();
+            info!(
+                "Outlook sync will delta-sync {} DB folders for account {}",
+                db_folders.len(),
+                self.base.account_id
+            );
             let mut sync_failure_count = 0u32;
 
             for folder in &db_folders {
@@ -585,6 +610,15 @@ impl OutlookSyncWorker {
                 .await
                 {
                     Ok(batch) => {
+                        let message_count = batch.messages.len();
+                        let deleted_count = batch.deleted_remote_ids.len();
+                        info!(
+                            "Outlook delta for folder '{}' returned {} messages, {} deletions (account {})",
+                            folder.name,
+                            message_count,
+                            deleted_count,
+                            self.base.account_id
+                        );
                         let mut failure_count = self
                             .persist_folder_messages(folder, batch.messages, notify_new)
                             .await;
@@ -606,6 +640,12 @@ impl OutlookSyncWorker {
                             }
                         }
                         sync_failure_count += failure_count;
+                        if failure_count > 0 {
+                            warn!(
+                                "Outlook delta persist for folder '{}' had {} failures",
+                                folder.name, failure_count
+                            );
+                        }
 
                         if let Some(delta_link) = batch.delta_link {
                             if can_advance_outlook_delta_cursor(failure_count) {
