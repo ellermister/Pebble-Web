@@ -20,7 +20,9 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::from_default_env()
-                .add_directive("pebble_web=info".parse().unwrap()),
+                .add_directive("pebble_web=info".parse().unwrap())
+                .add_directive("pebble_mail=info".parse().unwrap())
+                .add_directive("pebble_oauth=info".parse().unwrap()),
         )
         .init();
 

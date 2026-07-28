@@ -485,9 +485,21 @@ impl OutlookSyncWorker {
                 continue;
             }
 
+            info!(
+                "Outlook sync listing folders for account {}",
+                self.base.account_id
+            );
+
             // List folders and fetch messages per folder
             let folders = match self.provider.list_folders().await {
-                Ok(f) => f,
+                Ok(f) => {
+                    info!(
+                        "Outlook sync listed {} folders for account {}",
+                        f.len(),
+                        self.base.account_id
+                    );
+                    f
+                }
                 Err(e) => {
                     warn!("Outlook folder list failed: {e}");
                     self.base
